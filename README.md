@@ -86,7 +86,7 @@ Build the project in release mode:
 cargo build --release
 ```
 
-This will download and compile all dependencies. The first build may take 5-10 minutes. Subsequent builds will be faster.
+This will download and compile all dependencies. The first build may take 1-5 minutes. Subsequent builds will be faster.
 
 ## Running Benchmarks
 
@@ -232,7 +232,7 @@ shuflle_proof_test/
 
 | Benchmark | Command | Purpose |
 |-----------|---------|---------|
-| **Quick Validation** | `cargo bench --bench quick --features yoloproofs` | Fast correctness check |
+| **Quick Validation** | `cargo bench --bench quick --features yoloproofs` | Fast check |
 | **Table 1** | `cargo bench --bench table1 --features yoloproofs` | Prover performance (paper) |
 | **Table 2** | `cargo bench --bench table2 --features yoloproofs` | Verifier performance (paper) |
 | **Custom** | `cargo bench --bench r1cs --features yoloproofs` | User-defined parameters |
@@ -266,18 +266,6 @@ Your Rust version is too old. Update to Rust 1.81 or newer (see above).
 ### Error: "command 'rustup' not found"
 
 Install rustup following the instructions in the [Installation](#installation) section.
-
-### Build Failures
-
-Ensure:
-1. ✅ Rust 1.81 or newer installed (`rustc --version`)
-2. ✅ In correct directory (`cd shuflle_proof_test`)
-3. ✅ Internet connection available (for dependencies)
-4. ✅ Sufficient disk space (~500MB)
-
-### Benchmarks Running Slowly
-
-Benchmarks are computationally intensive. The `cargo bench` command automatically uses release mode for optimal performance. Runtime depends on hardware specifications.
 
 ### Verificatum: Port Already in Use
 
