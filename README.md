@@ -24,7 +24,6 @@ This repository contains the implementation of a logarithmic-size shuffle proof 
 This project requires **Rust 1.81 or newer**. We recommend using `rustup`, the official Rust toolchain installer.
 
 **System Requirements:**
-- Linux, macOS, or Windows with WSL
 - 4GB RAM minimum
 - ~500MB disk space for Rust toolchain and dependencies
 
