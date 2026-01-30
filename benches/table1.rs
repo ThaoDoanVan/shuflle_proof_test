@@ -1,8 +1,9 @@
-// R1CS Shuffle Proof Benchmark - Customizable Configuration
+// Table 1: Prover Performance 
 //
-// This file allows you to test custom parameters by editing the values below.
+// Run with: cargo bench --bench table1 --features yoloproofs
 //
-// Run with: cargo bench --bench r1cs --features yoloproofs
+// This reproduces Table 1 from the paper, comparing Binary (k=2) vs 4-ary (k=4)
+
 
 extern crate bulletproofs;
 use bulletproofs::r1cs::{ConstraintSystem, Prover, R1CSError, R1CSProof, Variable, Verifier};
@@ -27,23 +28,7 @@ use rand::seq::SliceRandom;
 extern crate bincode;
 
 // ============================================================================
-// CONFIGURATION: Edit these values to test different parameters
-// ============================================================================
-
-/// Number of ciphertexts to shuffle
-const N: usize = 4097;
-
-/// Folding factor (typically 2, 3, 4, 5)
-const K: usize = 4;
-
-/// Recursion depth
-const D: usize = 6;
-
-/// Number of samples for the benchmark (3-10 recommended)
-const SAMPLES: usize = 5;
-
-// ============================================================================
-// Implementation
+// KShuffleGadget 
 // ============================================================================
 
 struct KShuffleGadget {}
@@ -111,35 +96,8 @@ impl KShuffleGadget {
     }
 }
 
-fn calculate_proof_size(n_padded: usize, k: usize, d: usize) -> usize {
-    fn reconstruct_rest(mut n: usize, k: usize, d: usize) -> usize {
-        for _ in 0..d {
-            let rem = n % k;
-            let pad = if rem == 0 { 0 } else { k - rem };
-            n = (n + pad) / k;
-        }
-        n
-    }
-
-    let rest = reconstruct_rest(n_padded, k, d);
-    
-    // R1CS overhead: 13 points + 8 scalars + 2 u64 lengths
-    let r1cs_overhead = (13 + 8) * 32 + 16;
-    
-    // IPP proof: 3 headers + d rounds of (2k-2) points + 2 vectors of size rest
-    let ipp_points = if d > 0 { d * (2 * k - 2) } else { 0 };
-    let ipp_size = (3 + ipp_points + 2 * rest) * 32;
-    
-    // Batched ECP: 3 headers + d rounds of (2k-2)*2 points + 1 vector of size rest
-    let ecp_points = if d > 0 { d * (2 * k - 2) * 2 } else { 0 };
-    let ecp_size = (3 + ecp_points + rest) * 32;
-    
-    r1cs_overhead + ipp_size + ecp_size
-}
-
 fn kshuffle_prove_helper(num_rounds: usize, k: usize, k_original: usize, k_fold: usize, c: &mut Criterion) {
-    let label = format!("custom/n={}/k={}/d={}", k_original, k_fold, num_rounds);
-    let proof_size = calculate_proof_size(k, k_fold, num_rounds);
+    let label = format!("table1/prover/n={}/k={}/d={}", k_original, k_fold, num_rounds);
 
     c.bench_function(&label, move |b| {
         let mut rng = rand::thread_rng();
@@ -191,40 +149,54 @@ fn kshuffle_prove_helper(num_rounds: usize, k: usize, k_original: usize, k_fold:
             let _serialized_proof = bincode::serialize(&proof).unwrap();
         })
     });
-
-    // Print proof size after benchmark
-    println!("    Proof size: {} bytes ({:.2} KB)", proof_size, proof_size as f64 / 1024.0);
 }
 
 // ============================================================================
-// Benchmark Function
+// Table 1: Prover Performance
 // ============================================================================
 
-fn custom_benchmark(c: &mut Criterion) {
-    let proof_size = calculate_proof_size(N, K, D);
-    
-    println!("\n================================================================");
-    println!("  Custom Shuffle Proof Benchmark");
-    println!("================================================================");
-    println!("  Configuration (edit at top of benches/r1cs.rs):");
-    println!("    N (ciphertexts) = {}", N);
-    println!("    K (folding)     = {}", K);
-    println!("    D (depth)       = {}", D);
-    println!("    SAMPLES         = {}", SAMPLES);
-    println!("  Proof size: {} bytes ({:.2} KB)", proof_size, proof_size as f64 / 1024.0);
+fn table1_prover_performance(c: &mut Criterion) {
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║      TABLE 1: Prover Performance (5 samples)                 ║");
+    println!("║  Reproduces Table 1 from paper (Binary vs 4-ary)             ║");
+    println!("╚══════════════════════════════════════════════════════════════╝");
+    println!("\nThis benchmarks prover efficiency at different scales.");
+    println!();
+    println!("  For custom parameters:");
+    println!("    Edit benches/r1cs.rs (lines 28-43)");
+    println!("    cargo bench --bench r1cs --features yoloproofs");
     println!("================================================================\n");
 
-    kshuffle_prove_helper(D, N, N, K, c);
 
-    println!("\nBenchmark complete. See results above.\n");
+
+    // From paper Table 1
+    let test_cases = vec![
+        // (n, k, d, label)
+        (1024,    2, 10, "Binary"),
+        (1024,    4, 5,  "4-ary"),
+        (4096,    2, 12, "Binary"),
+        (4096,    4, 6,  "4-ary"),
+        (16384,   2, 14, "Binary"),
+        (16384,   4, 7,  "4-ary"),
+        (65536,   2, 16, "Binary"),
+        (65536,   4, 8,  "4-ary"),
+    ];
+
+    for (i, (n, k, d, label)) in test_cases.iter().enumerate() {
+        println!("[{}/{}] n={:6}, k={}, d={:2} ({})", 
+                 i+1, test_cases.len(), n, k, d, label);
+        kshuffle_prove_helper(*d, *n, *n, *k, c);
+    }
+
+    println!("\n Table 1 complete!");
 }
 
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(SAMPLES)
-        .measurement_time(std::time::Duration::from_secs(20));
-    targets = custom_benchmark
+        .sample_size(5)
+        .measurement_time(std::time::Duration::from_secs(30));
+    targets = table1_prover_performance
 }
 
 criterion_main!(benches);

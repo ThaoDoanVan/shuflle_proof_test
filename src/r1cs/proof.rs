@@ -3,11 +3,9 @@
 use curve25519_dalek::ristretto::CompressedRistretto;
 use curve25519_dalek::scalar::Scalar;
 
-// We use the new proof types defined in inner_product_proof.rs
 use inner_product_proof::K_BulletProof;
 use inner_product_proof::batched_eCP;
 
-// Serde imports
 use serde::de::Visitor;
 use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 use errors::ProofError;
@@ -45,40 +43,38 @@ pub struct R1CSProof {
     /// Blinding factor for the synthetic commitment to the inner-product arguments
     pub(super) e_blinding: Scalar,
     
-    // --- New Fields for K-ary and Consistency Checks ---
-    
-    /// The Main Circuit Proof (K-ary Bulletproof)
+    /// K-ary Bulletproof for main circuit
     pub(super) ipp_proof: K_BulletProof,
     
-    // Shuffle/Consistency Commitments
+    /// Shuffle consistency commitments
     pub(super) S_prime: CompressedRistretto,
     pub(super) T_1_prime: CompressedRistretto,
     pub(super) S1_prime: CompressedRistretto,
     pub(super) S2_prime: CompressedRistretto,
 
-    // Consistency Scalars
+    /// Consistency check scalars
     pub(super) tc_x: Scalar,
     pub(super) tc_x_blinding: Scalar,
     pub(super) ec_blinding: Scalar,
     pub(super) t_cross: Scalar,   
     pub(super) r_blinding: Scalar,
     
-    /// The Batched Consistency Proof
+    /// Batched consistency proof
     pub(super) ecp_batched: batched_eCP,
 }
 
 impl R1CSProof {
     /// Serializes the proof into a byte array.
     ///
-    /// The format is:
-    /// 1. 13 CompressedRistretto points (fixed size).
-    /// 2. 8 Scalars (fixed size).
-    /// 3. 2 u64-LE lengths for the variable-sized proofs. 
-    /// 4. The 2 variable-sized proof blobs.
+    /// Format:
+    /// 1. 13 CompressedRistretto points (416 bytes)
+    /// 2. 8 Scalars (256 bytes)
+    /// 3. 2 u64 lengths (16 bytes)
+    /// 4. Variable-sized proof data
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         
-        // 1. Write Compressed Ristretto Points (13 points)
+        // Write 13 compressed points
         buf.extend_from_slice(self.A_I.as_bytes());
         buf.extend_from_slice(self.A_O.as_bytes());
         buf.extend_from_slice(self.S.as_bytes());
@@ -93,7 +89,7 @@ impl R1CSProof {
         buf.extend_from_slice(self.S1_prime.as_bytes());
         buf.extend_from_slice(self.S2_prime.as_bytes());
 
-        // 2. Write Scalars (8 scalars)
+        // Write 8 scalars
         buf.extend_from_slice(self.t_x.as_bytes());
         buf.extend_from_slice(self.t_x_blinding.as_bytes());
         buf.extend_from_slice(self.e_blinding.as_bytes());
@@ -103,15 +99,15 @@ impl R1CSProof {
         buf.extend_from_slice(self.t_cross.as_bytes()); 
         buf.extend_from_slice(self.r_blinding.as_bytes());
         
-        // 3. Serialize variable-length proofs
+        // Serialize variable-length proofs
         let ipp_proof_bytes = self.ipp_proof.to_bytes(); 
         let ecp_batched_bytes = self.ecp_batched.to_bytes(); 
 
-        // 4. Write lengths as u64 (8 bytes each)
+        // Write lengths
         buf.extend_from_slice(&(ipp_proof_bytes.len() as u64).to_le_bytes()); 
         buf.extend_from_slice(&(ecp_batched_bytes.len() as u64).to_le_bytes());
 
-        // 5. Write data blobs
+        // Write proof data
         buf.extend_from_slice(ipp_proof_bytes.as_slice()); 
         buf.extend_from_slice(ecp_batched_bytes.as_slice());
         
@@ -121,13 +117,11 @@ impl R1CSProof {
     /// Deserializes the proof from a byte slice.
     pub fn from_bytes(slice: &[u8]) -> Result<R1CSProof, ProofError> {
         let point_count = 13;
-        let scalar_count = 8; // Updated to 8
+        let scalar_count = 8;
         let fixed_len = (point_count + scalar_count) * 32;
-
-        let len_prefix_count = 2; // Updated to 2
+        let len_prefix_count = 2;
         let len_prefix_len = len_prefix_count * 8; 
 
-        // Minimal length check
         if slice.len() < fixed_len + len_prefix_len {
             return Err(ProofError::FormatError);
         }
@@ -135,7 +129,7 @@ impl R1CSProof {
         let mut offset = 0;
         use util::read32;
 
-        // --- 1. Read Compressed Ristretto Points (13 points) ---
+        // Read 13 compressed points
         let mut read_point = |i: usize| -> CompressedRistretto {
             let pos = i * 32;
             CompressedRistretto(read32(&slice[pos..]))
@@ -157,7 +151,7 @@ impl R1CSProof {
 
         offset = point_count * 32;
 
-        // --- 2. Read Scalars (8 scalars) ---
+        // Read 8 scalars
         let mut read_scalar = |i: usize| -> Result<Scalar, ProofError> {
             let pos = offset + i * 32;
             Scalar::from_canonical_bytes(read32(&slice[pos..])).ok_or(ProofError::FormatError)
@@ -174,7 +168,7 @@ impl R1CSProof {
 
         offset += scalar_count * 32; 
 
-        // --- 3. Read Proof lengths ---
+        // Read proof lengths
         let mut read_len = |offset: &mut usize| -> Result<usize, ProofError> {
             if slice.len() < *offset + 8 {
                 return Err(ProofError::FormatError);
@@ -189,42 +183,33 @@ impl R1CSProof {
         let ipp_proof_len   = read_len(&mut offset)?; 
         let ecp_batched_len = read_len(&mut offset)?; 
 
-        // --- 4. Check total length ---
+        // Verify total length
         let total_expected_len = offset + ipp_proof_len + ecp_batched_len;
         
         if slice.len() != total_expected_len {
             return Err(ProofError::FormatError);
         }
 
-        // --- 5. Read Proof components ---
-        
-        // a. ipp_proof (Main Circuit)
+        // Deserialize proofs
         let ipp_proof = K_BulletProof::from_bytes(&slice[offset..offset + ipp_proof_len])?;
         offset += ipp_proof_len;
         
-        // b. ecp_batched (Consistency)
         let ecp_batched = batched_eCP::from_bytes(&slice[offset..offset + ecp_batched_len])?;
-        // offset += ecp_batched_len; // Not strictly needed as we are at the end
         
         Ok(R1CSProof {
             A_I, A_O, S, T_1, T_2, T_3, T_4, T_5, T_6,
             t_x, t_x_blinding, e_blinding,
-            
             ipp_proof,
-            
             S_prime, T_1_prime,
             tc_x, tc_x_blinding, ec_blinding,
             t_cross,
-            
             S1_prime, S2_prime,
             r_blinding,
-            
             ecp_batched,
         })
     }
 }
 
-// === Serde Serialization Implementation ===
 impl Serialize for R1CSProof {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -234,7 +219,6 @@ impl Serialize for R1CSProof {
     }
 }
 
-// === Serde Deserialization Implementation ===
 impl<'de> Deserialize<'de> for R1CSProof {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

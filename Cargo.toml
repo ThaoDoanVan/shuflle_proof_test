@@ -23,6 +23,7 @@ serde_derive = "1"
 failure = "0.1"
 merlin = "1"
 clear_on_drop = "0.2"
+clap = "2.33"
 
 [dev-dependencies]
 hex = "0.3"
@@ -42,11 +43,30 @@ name = "range_proof"
 name = "r1cs"
 required-features = ["yoloproofs"]
 
-[[bench]]
-name = "range_proof"
-harness = false
+# ============================================================================
+# BENCHMARK FILES 
+# ============================================================================
 
 [[bench]]
 name = "r1cs"
 harness = false
 required-features = ["yoloproofs"]
+
+[[bench]]
+name = "quick"
+harness = false
+required-features = ["yoloproofs"]
+
+[[bench]]
+name = "table1"
+harness = false
+required-features = ["yoloproofs"]
+
+[[bench]]
+name = "table2"
+harness = false
+required-features = ["yoloproofs"]
+
+# Interactive benchmark binary
+[[bin]]
+name = "shuffle_bench"

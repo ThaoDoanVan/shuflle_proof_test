@@ -96,7 +96,7 @@ impl<'a, 'b> ConstraintSystem for VerifierCS<'a, 'b> {
     }
 
     fn constrain(&mut self, lc: LinearCombination) {
-        // TODO: check that the linear combinations are valid
+        
         // (e.g. that variables are valid, that the linear combination
         // evals to 0 for prover, etc).
         self.constraints.push(lc);
@@ -175,18 +175,6 @@ impl<'a, 'b> Verifier<'a, 'b> {
     ///
     /// Returns a pair of a Pedersen commitment (as a compressed Ristretto point),
     /// and a [`Variable`] corresponding to it, which can be used to form constraints.
-    pub fn commit(&mut self, commitment: CompressedRistretto) -> Variable {
-        let i = self.m as usize;
-        self.m += 1;
-        self.cs.V.push(commitment);
-
-        // Add the commitment to the transcript.
-        self.cs.transcript.commit_point(b"V", &commitment);
-
-        Variable::Committed(i)
-    }
-
-    ///
     pub fn commit_vec(
         &mut self,
         commitment: CompressedRistretto,
@@ -220,14 +208,8 @@ impl<'a, 'b> Verifier<'a, 'b> {
 }
 
 /// Finds the smallest power of k (i.e., k^x)
-/// that is greater than or equal to n, using a
-/// fast logarithm-based estimation with integer correction.
-///
-#[inline] // Hint to the compiler to inline this small, hot function
+#[inline] 
 fn next_power_of_k(n: usize, k: usize) -> usize {
-    // --- 1. Handle edge cases ---
-    
-    // k^0 = 1. This is the smallest power.
     if n <= 1 {
         return 1;
     }
@@ -236,36 +218,20 @@ fn next_power_of_k(n: usize, k: usize) -> usize {
         0 => panic!("Cannot find a power of 0 >= {}", n),
         1 => panic!("Cannot find a power of 1 >= {}", n), // 1^x is always 1
         
-        // --- 2. Main logic for k >= 2 ---
+       
         _ => {
-            // --- 3. Estimate exponent using floating-point logs ---
-            // We want to find the smallest integer 'x' such that k^x >= n.
-            // This is equivalent to x >= log_k(n).
-            // So, we calculate x = ceil(log_k(n)).
-            // We use log_k(n) = ln(n) / ln(k).
-            
             let n_f = n as f64;
             let k_f = k as f64;
             let exponent = (n_f.ln() / k_f.ln()).ceil() as u32;
 
-            // --- 4. Calculate the estimated power ---
-            // This is our first guess, k^x.
             let mut power = k.checked_pow(exponent)
                 .unwrap_or_else(|| panic!("Overflow: k^x exceeds usize::MAX"));
 
-            // --- 5. Correct for floating-point inaccuracies ---
-
-            // Case A: Guess was too low (due to precision errors, n_f.ln() / k_f.ln()
-            // was slightly less than an integer, and ceil() rounded to x-1).
-            // If power < n, we need the next power up.
             if power < n {
                 power = power.checked_mul(k)
                     .unwrap_or_else(|| panic!("Overflow: k^x * k exceeds usize::MAX"));
             }
             
-            // Case B: Guess was too high (due to precision errors, ceil()
-            // rounded up unnecessarily).
-            // We check if the *previous* power, k^(x-1), was already >= n.
             if let Some(prev_power) = power.checked_div(k) {
                 if prev_power >= n {
                     power = prev_power;
@@ -350,35 +316,11 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
     use util;
 
     // -----------------------------------------------------------------------------
-    // 1. Checks & Padding (PARTIAL FOLDING)
+    // 1. Checks & Padding 
     // -----------------------------------------------------------------------------
     let n = self.num_vars;
     let padded_n = self.num_inputs;
     let k_fold = proof.ipp_proof.k;
-
-    /*// --- Derive padded_n from the Proof Structure ---
-    // Since the optimization  of LinearCombination * (-z)) n = self.num_vars # Prover's
-    // Compute padded_n = m * k^d from the proof
-    let k_fold = proof.ipp_proof.k;
-    let num_rounds = proof.ipp_proof.U_vecs.len(); // Depth d
-    let m = proof.ipp_proof.a_final.len();
-   
-    //let m = self.num_inputs;
-
-    // Calculate N = m * k^d
-    // This is the size the Prover committed to.
-    let mut padded_n = m;
-    for _ in 0..num_rounds {
-        padded_n = padded_n.checked_mul(k_fold)
-            .ok_or(R1CSError::VerificationError)?;
-    }
-    
-    // Ensure the proof is large enough for our real constraints
-    if padded_n < n { 
-        return Err(R1CSError::VerificationError); 
-    }
-    */
-
     let pad = padded_n - n;
 
 
@@ -386,7 +328,6 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
         return Err(R1CSError::InvalidGeneratorsLength);
     }
 
-    // We are performing a single-party circuit proof, so party index is 0.
     let gens = self.bp_gens.share(0);
 
     // -----------------------------------------------------------------------------
@@ -418,7 +359,6 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
 
     let (wL, wR, wO, wV, wc) = self.flattened_constraints(&z);
 
-    // External Consistency Setup (Megacheck I Setup)
     self.transcript.commit_point(b"S_prime", &proof.S_prime);
     self.transcript.commit_point(b"T_1_prime", &proof.T_1_prime);
     self.transcript.commit_point(b"S1_prime", &proof.S1_prime);
@@ -431,7 +371,6 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
     self.transcript.commit_scalar(b"ec_blinding", &proof.ec_blinding);
     self.transcript.commit_scalar(b"r_blinding", &proof.r_blinding);
 
-    // Protocol A: Aggregation Setup
     self.transcript.commit_scalar(b"t_cross", &proof.t_cross);
     let t_cross = proof.t_cross;
 
@@ -439,16 +378,14 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
     let w_agg = self.transcript.challenge_scalar(b"w_agg");
 
     // -----------------------------------------------------------------------------
-    // 3. Scalar & Point Reconstruction (PARTIAL FOLDING)
+    // 3. Scalar & Point Reconstruction 
     // -----------------------------------------------------------------------------
-    // Get Verification Scalars from the Single Aggregated IPA
     let (s_g_cir, s_h_cir, s_Q_cir, s_P_cir, s_U_cir) = proof
         .ipp_proof
         .verification_scalars(padded_n, self.transcript)
         .map_err(|_| R1CSError::VerificationError)?;
 
 
-    // Decompress U points safely
     let mut U_points_decompressed_cir: Vec<RistrettoPoint> =
         Vec::with_capacity(proof.ipp_proof.U_vecs.len() * (2 * k_fold - 2));
 
@@ -461,7 +398,6 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
         }
     }
 
-    // Reconstruct Vector Weights
     let y_inv = y.invert();
     let y_inv_vec: Vec<Scalar> = util::exp_iter(y_inv).take(padded_n).collect();
 
@@ -474,18 +410,15 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
 
     let delta = inner_product(&yneg_wR[0..n], &wL);
 
-    // Calculate g_scalars
     let g_scalars: Vec<Scalar> = s_g_cir
         .iter()
         .zip(yneg_wR.iter())
         .map(|(s_g_i, yneg_wR_i)| s_g_i - x * yneg_wR_i * s_P_cir) 
-        //.map(|(s_g_i, yneg_wR_i)| s_g_i * a_final - x * yneg_wR_i * s_P_cir)
         .collect();
 
 
     let rC: Vec<Scalar> = wV.to_vec();
 
-    // Calculate h_scalars
     let h_scalars: Vec<Scalar> = s_h_cir
         .iter()
         .zip(y_inv_vec.iter())
@@ -512,7 +445,6 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
     let xxx = x * xx;
     let r2 = r * r;
 
-    // T polynomials scalars and points
     let T_scalars = [
         r * x,
         r * xx,
@@ -525,20 +457,16 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
         proof.T_1, proof.T_2, proof.T_3, proof.T_4, proof.T_5, proof.T_6,
     ];
 
-    // Aggregated Inner Product Expectation
     let expected_ip = proof.t_x + x_ipp * t_cross + x_ipp * x_ipp * proof.tc_x;
 
-    // Basepoint Scalar B
     let B_scalar = w_agg * s_Q_cir - w_agg * expected_ip * s_P_cir
         + r * (xx * (wc + delta) - proof.t_x)
         - r2 * proof.tc_x;
 
-    // Blinding Scalar B_blinding
     let B_blinding_scalar = x_ipp * proof.ec_blinding * s_P_cir + proof.e_blinding * s_P_cir
         - r2 * proof.tc_x_blinding
         - r * proof.t_x_blinding;
 
-    // Megacheck III Setup (Batched ECP)
     let chall_batched_ecp = self.transcript.challenge_scalar(b"chall_batched_ecp");
 
     let r3 = r2 * r;
@@ -594,15 +522,12 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
         .chain(iter::once(s_S2_prime)) // S2_prime
         .chain(iter::once(s_C0)) // C[0]
         .chain(iter::once(s_C1)) // C[1]
-        //.chain(z_s_vec.iter().map(|z| z * r3)) // C1' vec
-        //.chain(z_s_vec.iter().map(|z| z * r3 * chall_batched_ecp)) // C2' vec
         .chain(z_s_vec[0..k_original].iter().map(|z| z * r3)) // C1' vec only length k_original
         .chain(z_s_vec[0..k_original].iter().map(|z| z * r3 * chall_batched_ecp)) // C2' vec only length k_original
         .chain(s_A_vec.iter().map(|s_A| -s_A * r4)) // A0 vec
         .chain(s_A_vec.iter().map(|s_A| -s_A * r3)) // A1 vec
         .collect();
 
-    // We collect points safely, returning error if decompression fails
     let combined_points_iter = iter::once(proof.A_I.decompress())
         .chain(iter::once(proof.A_O.decompress()))
         .chain(iter::once(proof.S.decompress()))
@@ -629,7 +554,7 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
                 .iter()
                 .flatten()
                 .map(|A| A[0].decompress()),
-        ) // A0 vec
+        ) 
         .chain(
             proof
                 .ecp_batched
@@ -637,9 +562,8 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
                 .iter()
                 .flatten()
                 .map(|A| A[1].decompress()),
-        ); // A1 vec
+        ); 
 
-    // Collect into Vec<RistrettoPoint>, checking for decompression errors
     let combined_points: Vec<RistrettoPoint> = combined_points_iter
         .collect::<Option<Vec<_>>>()
         .ok_or(R1CSError::VerificationError)?;
@@ -656,5 +580,4 @@ impl<'a, 'b> VerifierCS<'a, 'b> {
     Ok(())
 }
   
-       }
-        
+}

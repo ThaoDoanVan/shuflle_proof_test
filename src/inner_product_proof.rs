@@ -13,8 +13,6 @@ use errors::ProofError;
 use transcript::TranscriptProtocol;
 use std::convert::TryInto;
 
-
-//for testing
 use curve25519_dalek::traits::IsIdentity;
 
 // =========================================================================
@@ -76,9 +74,7 @@ impl InnerProductProof {
         mut a_vec: Vec<Scalar>,
         mut b_vec: Vec<Scalar>,
     ) -> InnerProductProof {
-        // Create slices G, H, a, b backed by their respective
-        // vectors.  This lets us reslice as we compress the lengths
-        // of the vectors in the main loop below.
+        
         let mut G = &mut G_vec[..];
         let mut H = &mut H_vec[..];
         let mut a = &mut a_vec[..];
@@ -101,8 +97,7 @@ impl InnerProductProof {
         let mut L_vec = Vec::with_capacity(lg_n);
         let mut R_vec = Vec::with_capacity(lg_n);
 
-        // If it's the first iteration, unroll the Hprime = H*y_inv scalar mults
-        // into multiscalar muls, for performance.
+        
         if n != 1 {
             n = n / 2;
             let (a_L, a_R) = a.split_at_mut(n);
@@ -217,9 +212,6 @@ impl InnerProductProof {
         }
     }
 
-    /// Computes three vectors of verification scalars \\([u\_{i}^{2}]\\), \\([u\_{i}^{-2}]\\) and \\([s\_{i}]\\) for combined multiscalar multiplication
-    /// in a parent protocol. See [inner product protocol notes](index.html#verification-equation) for details.
-    /// The verifier must provide the input length \\(n\\) explicitly to avoid unbounded allocation within the inner product proof.
     pub(crate) fn verification_scalars(
         &self,
         n: usize,
@@ -227,8 +219,6 @@ impl InnerProductProof {
     ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofError> {
         let lg_n = self.L_vec.len();
         if lg_n >= 32 {
-            // 4 billion multiplications should be enough for anyone
-            // and this check prevents overflow in 1<<lg_n below.
             return Err(ProofError::VerificationError);
         }
         if n != (1 << lg_n) {
@@ -254,7 +244,6 @@ impl InnerProductProof {
         // 3. Compute u_i^2 and (1/u_i)^2
 
         for i in 0..lg_n {
-            // XXX missing square fn upstream
             challenges[i] = challenges[i] * challenges[i];
             challenges_inv[i] = challenges_inv[i] * challenges_inv[i];
         }
@@ -262,14 +251,11 @@ impl InnerProductProof {
         let challenges_inv_sq = challenges_inv;
 
         // 4. Compute s values inductively.
-
         let mut s = Vec::with_capacity(n);
         s.push(allinv);
         for i in 1..n {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
             let k = 1 << lg_i;
-            // The challenges are stored in "creation order" as [u_k,...,u_1],
-            // so u_{lg(i)+1} = is indexed by (lg_n-1) - lg_i
             let u_lg_i_sq = challenges_sq[(lg_n - 1) - lg_i];
             s.push(s[i - k] * u_lg_i_sq);
         }
@@ -300,7 +286,6 @@ impl InnerProductProof {
 
         let a_times_s = s.iter().map(|s_i| self.a * s_i).take(G.len());
 
-        // 1/s[i] is s[!i], and !i runs from n-1 to 0 as i runs from 0 to n-1
         let inv_s = s.iter().rev();
 
         let h_times_b_div_s = Hprime_factors
@@ -346,8 +331,6 @@ impl InnerProductProof {
     /// Returns the size in bytes required to serialize the inner
     /// product proof.
     ///
-    /// For vectors of length `n` the proof size is
-    /// \\(32 \cdot (2\lg n+2)\\) bytes.
     pub fn serialized_size(&self) -> usize {
         (self.L_vec.len() * 2 + 2) * 32
     }
@@ -412,7 +395,7 @@ impl InnerProductProof {
 
 
 // =========================================================================
-//  K_BulletProof (Partial Folding with Dynamic Padding)
+//  K_BulletProof (IPA with Iterative Padding)
 // =========================================================================
 
 #[derive(Clone, Debug)]
@@ -619,7 +602,6 @@ impl K_BulletProof {
             challenges.push(transcript.challenge_scalar(b"challenge_separator"));
         }
 
-        // --- Compute scalars ---
         let mut challenges_inv = challenges.clone();
         Scalar::batch_invert(&mut challenges_inv);
         
@@ -634,8 +616,6 @@ impl K_BulletProof {
         }
         s_P = product_so_far;
 
-        // 1. s_g_full initialization
-        // G terms need scaling by s_P because they were folded with c_inv
         let mut s_g_full = self.a_final.clone(); 
         for r in (0..d).rev() {
             let c_inv = challenges_inv[r];
@@ -643,7 +623,6 @@ impl K_BulletProof {
             let mut val = Scalar::one();
             for _ in 0..k { block.push(val); val *= c_inv; }
 
-            // Block-wise expansion
             let mut next_s = Vec::with_capacity(s_g_full.len() * k);
             for b in block.iter() {
                 for val in s_g_full.iter() { next_s.push(val * b); }
@@ -654,8 +633,6 @@ impl K_BulletProof {
         }
         for x in s_g_full.iter_mut() { *x *= s_P; }
 
-        // 2. s_h_full initialization
-        // H terms do NOT need scaling by s_P because they were folded with c
         let mut s_h_full = self.b_final.clone(); 
         for r in (0..d).rev() {
             let c = challenges[r];
@@ -663,7 +640,6 @@ impl K_BulletProof {
             let mut val = Scalar::one();
             for _ in 0..k { block.push(val); val *= c; }
 
-            // Block-wise expansion
             let mut next_s = Vec::with_capacity(s_h_full.len() * k);
             for b in block.iter() {
                 for val in s_h_full.iter() { next_s.push(val * b); }
@@ -672,12 +648,9 @@ impl K_BulletProof {
             next_s.truncate(round_lengths[r]);
             s_h_full = next_s;
         }
-        // CORRECTED: Do NOT multiply s_h_full by s_P
-        
-        // CORRECTED: Do NOT multiply s_Q by s_P
+    
         let s_Q_final = inner_product(&self.a_final, &self.b_final); 
 
-        // --- Compute s_U ---
         let mut s_U: Vec<Scalar> = Vec::with_capacity(d * (2*k - 2));
         for r in 0..d { 
             let c_r = challenges[r];
@@ -738,7 +711,6 @@ impl K_BulletProof {
         if check.is_identity() { Ok(()) } else { Err(ProofError::VerificationError) }
     }
     
-    // ... [serialized_size, to_bytes, from_bytes unchanged] ...
     pub fn serialized_size(&self) -> usize {
         let d = self.U_vecs.len();
         let num_points = if d > 0 { d * (2 * self.k - 2) } else { 0 };
@@ -820,7 +792,7 @@ impl K_BulletProof {
 
 
 // =========================================================================
-//  batched_eCP (Partial Folding with Dynamic Padding)
+//  batched_eCP (eCP with Iterative Padding)
 // =========================================================================
 
 #[derive(Clone, Debug)]
@@ -1014,7 +986,6 @@ impl batched_eCP {
         }
         s_P = product_so_far; 
 
-        // FIX: Expand by Concatenation (Block-wise)
         let mut z_s_vec = self.z.clone();
         for r in (0..d).rev() {
             let c_inv = challenges_inv[r];
@@ -1022,7 +993,6 @@ impl batched_eCP {
             let mut val = Scalar::one();
             for _ in 0..k { block.push(val); val *= c_inv; }
 
-            // Block-wise expansion
             let mut next_s = Vec::with_capacity(z_s_vec.len() * k);
             for b in block.iter() {
                 for z_val in z_s_vec.iter() { next_s.push(z_val * b); }
@@ -1032,7 +1002,6 @@ impl batched_eCP {
             z_s_vec = next_s;
         }
 
-        // Apply s_P scaling to z_s_vec (Matches G logic)
         for x in z_s_vec.iter_mut() {
             *x *= s_P;
         }

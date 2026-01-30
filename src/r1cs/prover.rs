@@ -17,10 +17,6 @@ use transcript::TranscriptProtocol;
 use std::iter;
 
 
-// For testing 
-use curve25519_dalek::traits::VartimeMultiscalarMul;
-
-
 
 /// An entry point for creating a R1CS proof.
 ///
@@ -82,7 +78,7 @@ impl<'a, 'b> Drop for ProverCS<'a, 'b> {
         for e in self.a_O.iter_mut() {
             e.clear();
         }
-        // XXX use ClearOnDrop instead of doing the above
+        
     }
 }
 
@@ -134,7 +130,7 @@ impl<'a, 'b> ConstraintSystem for ProverCS<'a, 'b> {
     }
 
     fn constrain(&mut self, lc: LinearCombination) {
-        // TODO: check that the linear combinations are valid
+        
         // (e.g. that variables are valid, that the linear combination evals to 0 for prover, etc).
         self.constraints.push(lc);
     }
@@ -228,21 +224,6 @@ impl<'a, 'b> Prover<'a, 'b> {
         //self.cs.v_blinding.push(v_blinding);
         self.cs.v_blinding = v_blinding;
 
-
-        // Compute the vector Pedersen commitment:
-        // V = <v_i, G_i> + v_blinding * B_blinding
-       
-        // OPTIMIZED MSM:
-        // V = v_blinding * B_blinding + sum_{0..k_original} (v_i * G_i)
-        // We skip sum_{k_original..n_padded} because v_i is 0.
-        //TODO: recover V for self.cs.bp_gens.G(k_original, 1
-        /*let V = RistrettoPoint::multiscalar_mul(
-            iter::once(&v_blinding)
-                .chain(v[0..k_original].iter()), 
-            iter::once(&self.cs.pc_gens.B_blinding)
-                .chain(self.cs.bp_gens.G(k_original, 1)), 
-        )
-        .compress();*/
         let V = RistrettoPoint::multiscalar_mul(
             iter::once(&v_blinding)
                 .chain(v.iter()), 
@@ -364,15 +345,11 @@ impl<'a, 'b> ProverCS<'a, 'b> {
     // -----------------------------------------------------------------------------
     let n = self.a_L.len();
     let k = self.v.len();
-    
-    //let padded_n = k.next_power_of_two();
-    //let padded_n = k;//because i need to pad from fill_cs, i.e. before doing proof already ; padded_n =next_power_of_k(n, k_fold);
-
+   
     if self.bp_gens.gens_capacity < k {
         return Err(R1CSError::InvalidGeneratorsLength);
     }
     
-    // Single-party circuit proof, so party index is 0
     let gens = self.bp_gens.share(0);
 
     // -----------------------------------------------------------------------------
@@ -426,13 +403,9 @@ impl<'a, 'b> ProverCS<'a, 'b> {
 
     let (wL, wR, wO, wV) = self.flattened_constraints(&z);
 
-    // OPTIMIZATION: Compute exp_y_inv. 
-    // We fuse H_prime calculation later to avoid iterating this vector multiple times.
     let y_inv = y.invert();
     let exp_y_inv: Vec<Scalar> = util::exp_iter(y_inv).take(k).collect();
 
-    // Note: If VecPoly3 can be initialized with capacity, do so. 
-    // Otherwise, we rely on standard initialization.
     let mut l_poly = util::VecPoly3::zero(n);
     let mut r_poly = util::VecPoly3::zero(n);
     let mut exp_y = Scalar::one();
@@ -491,13 +464,9 @@ impl<'a, 'b> ProverCS<'a, 'b> {
     let mut l_vec = l_poly.eval(x);
     let mut r_vec = r_poly.eval(x);
     
-    // OPTIMIZATION: Immediate resize with zero-fill.
-    // This is cheap, but we will optimize the Usage of these zeros later.
     l_vec.resize(k, Scalar::zero());
     r_vec.resize(k, Scalar::zero());
 
-    // Fix r_vec padding (-y^n term)
-    // Resume exp_y from where loop left off
     for i in n..k {
         r_vec[i] = -exp_y;
         exp_y *= y;
@@ -516,14 +485,12 @@ impl<'a, 'b> ProverCS<'a, 'b> {
     let rnd = Scalar::random(&mut rng);
     let k_original = C1_prime.len();
 
-    // OPTIMIZATION: pre-allocate
     let mut s_L_prime = Vec::with_capacity(k);
     
     for _ in 0..k_original { 
         s_L_prime.push(Scalar::random(&mut rng)); 
     }
 
-    // Optimization: Only multiply up to k_original (since rest of s_L_prime is 0)
     let S_prime = RistrettoPoint::multiscalar_mul(
         iter::once(&s_bl_prime).chain(s_L_prime[0..k_original].iter()),
         iter::once(&self.pc_gens.B_blinding).chain(gens.G(k_original)),
@@ -583,7 +550,7 @@ impl<'a, 'b> ProverCS<'a, 'b> {
     // 5. Aggregation Protocol (Math Optimized)
     // -----------------------------------------------------------------------------
     
-    // OPTIMIZATION: Smart t_cross calculation.
+    
     // Instead of creating padded vectors and dot-producting zeros, 
     // we only dot-product the valid range (0..k).
     // t_cross = <l, rc_pad> + <lc_pad, r>  
@@ -594,52 +561,34 @@ impl<'a, 'b> ProverCS<'a, 'b> {
     self.transcript.commit_scalar(b"t_cross", &t_cross);
     let x_ipp = self.transcript.challenge_scalar(b"x_ipp");
 
-    // OPTIMIZATION: Single-pass Aggregation
+    
     // We construct l_agg and r_agg directly, handling the padding logic 
     // inside the loop. This removes the need for `lc_vec_pad` allocations entirely.
     let mut l_agg = Vec::with_capacity(k);
     let mut r_agg = Vec::with_capacity(k);
 
-    // 1. Valid Range (0..k): Mix l/r with lc/rc
     for i in 0..k {
         l_agg.push(l_vec[i] + x_ipp * lc_vec[i]);
         r_agg.push(r_vec[i] + x_ipp * rc_vec[i]);
     }
 
-    // 2. Padding Range (k..padded_n): lc/rc are effectively 0, so just copy l/r
-    //if padded_n > k {
-    //    l_agg.extend_from_slice(&l_vec[k..padded_n]);
-    //    r_agg.extend_from_slice(&r_vec[k..padded_n]);
-    //}
 
     let w_agg = self.transcript.challenge_scalar(b"w_agg");
     let Q_agg = w_agg * self.pc_gens.B;
 
-    // OPTIMIZATION: Fuse H_prime creation
-    // We zip directly with the generator iterator to avoid creating an intermediate `H_padded` vector.
-    // This saves one huge memory allocation and copy.
+    
     let H_prime: Vec<RistrettoPoint> = gens.H(k)
         .zip(exp_y_inv.iter())
         .map(|(H_i, exp_i)| H_i * exp_i)
         .collect();
 
-    /*let ipp_proof = K_BulletProof::create(
-        self.transcript,
-        k_fold,
-        gens.G(padded_n).cloned().collect(),
-        H_prime,
-        Q_agg,
-        l_agg,
-        r_agg,
-        num_rounds,
-    );*/
+  
 
-    // OPTIMIZATION: Pass references to slices instead of cloning large vectors
     let ipp_proof = K_BulletProof::create(
         self.transcript,
         k_fold,
-        &self.bp_gens.G_vec[0][0..k], // Zero-copy: Pass slice from BulletproofGens directly
-        &H_prime,                         // Pass reference
+        &self.bp_gens.G_vec[0][0..k], 
+        &H_prime,                        
         Q_agg,
         &l_agg,                          
         &r_agg,                           
@@ -660,15 +609,12 @@ impl<'a, 'b> ProverCS<'a, 'b> {
     let ecp_batched = batched_eCP::create(
         self.transcript,
         k_fold,
-        //gens.G(k).cloned().collect(),
-        &self.bp_gens.G_vec[0][0..k], // Zero-copy
+        &self.bp_gens.G_vec[0][0..k], 
         &C_agg,
         &lc_vec,
         num_rounds,
     );
-    //let test = self.transcript.challenge_scalar(b"test");
-    //println!("test P = {:?}", test);
-
+   
     
     // -----------------------------------------------------------------------------
     // 7. Cleanup

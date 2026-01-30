@@ -1,8 +1,6 @@
-// R1CS Shuffle Proof Benchmark - Customizable Configuration
+// Quick Validation Benchmark
 //
-// This file allows you to test custom parameters by editing the values below.
-//
-// Run with: cargo bench --bench r1cs --features yoloproofs
+// Run with: cargo bench --bench quick --features yoloproofs
 
 extern crate bulletproofs;
 use bulletproofs::r1cs::{ConstraintSystem, Prover, R1CSError, R1CSProof, Variable, Verifier};
@@ -25,26 +23,6 @@ use rand::Rng;
 use rand::seq::SliceRandom;
 
 extern crate bincode;
-
-// ============================================================================
-// CONFIGURATION: Edit these values to test different parameters
-// ============================================================================
-
-/// Number of ciphertexts to shuffle
-const N: usize = 4097;
-
-/// Folding factor (typically 2, 3, 4, 5)
-const K: usize = 4;
-
-/// Recursion depth
-const D: usize = 6;
-
-/// Number of samples for the benchmark (3-10 recommended)
-const SAMPLES: usize = 5;
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 struct KShuffleGadget {}
 
@@ -138,7 +116,7 @@ fn calculate_proof_size(n_padded: usize, k: usize, d: usize) -> usize {
 }
 
 fn kshuffle_prove_helper(num_rounds: usize, k: usize, k_original: usize, k_fold: usize, c: &mut Criterion) {
-    let label = format!("custom/n={}/k={}/d={}", k_original, k_fold, num_rounds);
+    let label = format!("quick/n={}/k={}/d={}", k_original, k_fold, num_rounds);
     let proof_size = calculate_proof_size(k, k_fold, num_rounds);
 
     c.bench_function(&label, move |b| {
@@ -192,39 +170,40 @@ fn kshuffle_prove_helper(num_rounds: usize, k: usize, k_original: usize, k_fold:
         })
     });
 
-    // Print proof size after benchmark
-    println!("    Proof size: {} bytes ({:.2} KB)", proof_size, proof_size as f64 / 1024.0);
+    println!("      Proof size: {} bytes ({:.2} KB)", proof_size, proof_size as f64 / 1024.0);
 }
 
-// ============================================================================
-// Benchmark Function
-// ============================================================================
-
-fn custom_benchmark(c: &mut Criterion) {
-    let proof_size = calculate_proof_size(N, K, D);
-    
+fn quick_demo(c: &mut Criterion) {
     println!("\n================================================================");
-    println!("  Custom Shuffle Proof Benchmark");
+    println!("  Quick Validation Benchmark");
     println!("================================================================");
-    println!("  Configuration (edit at top of benches/r1cs.rs):");
-    println!("    N (ciphertexts) = {}", N);
-    println!("    K (folding)     = {}", K);
-    println!("    D (depth)       = {}", D);
-    println!("    SAMPLES         = {}", SAMPLES);
-    println!("  Proof size: {} bytes ({:.2} KB)", proof_size, proof_size as f64 / 1024.0);
+    println!("  This test verifies that the implementation functions");
+    println!("  correctly with small-scale inputs.");
+    println!();
+    println!("  For paper reproduction:");
+    println!("    cargo bench --bench table1 --features yoloproofs");
+    println!("    cargo bench --bench table2 --features yoloproofs");
+    println!();
+    println!("  For custom parameters:");
+    println!("    Edit benches/r1cs.rs (lines 28-43)");
+    println!("    cargo bench --bench r1cs --features yoloproofs");
     println!("================================================================\n");
 
-    kshuffle_prove_helper(D, N, N, K, c);
+    println!("[1/2] Testing n=1,024, k=4, d=5...");
+    kshuffle_prove_helper(5, 1024, 1024, 4, c);
 
-    println!("\nBenchmark complete. See results above.\n");
+    println!("\n[2/2] Testing n=4,096, k=4, d=6...");
+    kshuffle_prove_helper(6, 4096, 4096, 4, c);
+
+    println!("\nQuick validation complete.\n");
 }
 
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(SAMPLES)
+        .sample_size(3)
         .measurement_time(std::time::Duration::from_secs(20));
-    targets = custom_benchmark
+    targets = quick_demo
 }
 
 criterion_main!(benches);
