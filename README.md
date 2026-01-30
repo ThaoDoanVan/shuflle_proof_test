@@ -7,8 +7,7 @@ This repository contains the implementation of a logarithmic-size shuffle proof 
   - [Prerequisites](#prerequisites)
   - [Step 1: Install Rust](#step-1-install-rust-if-not-already-installed)
   - [Step 2: Verify Installation](#step-2-verify-rust-installation)
-  - [Step 3: Clone Repository](#step-3-clone-the-repository)
-  - [Step 4: Build Project](#step-4-building-the-project)
+  - [Step 3: Build Project](#step-4-building-the-project)
 - [Running Benchmarks](#running-benchmarks)
   - [Quick Validation](#quick-validation)
   - [Reproducing Paper Results](#reproducing-paper-results)
@@ -71,14 +70,7 @@ rustup update stable
 rustup default stable
 ```
 
-### Step 3: Clone the Repository
-
-```bash
-git clone https://github.com/ThaoDoanVan/shufffle_proof_test.git
-cd shuflle_proof_test
-```
-
-### Step 4: Building the Project
+### Step 3: Building the Project
 
 Build the project in release mode:
 
