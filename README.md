@@ -131,7 +131,7 @@ To test with your own parameters:
 2. **Modify lines 28-43**:
 
 ```rust
-const N: usize = 4096;           // Number of ciphertexts
+const N: usize = 4097;           // Number of ciphertexts
 const K: usize = 4;              // Folding factor
 const D: usize = 6;              // Recursion depth
 const SAMPLES: usize = 5;        // Number of samples (3-10 recommended)
